@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Server Monitor</title>
+<style>
+:root{
+  --bg:#f4f6f9;--panel:#fff;--text:#1b2330;--muted:#677386;--line:#e2e6ec;
+  --accent:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--chip:#eef1f5;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f141b;--panel:#171e28;--text:#e6ebf2;--muted:#8b97a8;--line:#263142;
+  --accent:#5b8cff;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--chip:#212a37;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;cursor:pointer}
+input,select{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.hidden{display:none!important}
+
+/* login */
+#login{min-height:100vh;display:grid;place-items:center;padding:16px}
+#login form{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;width:100%;max-width:360px;display:grid;gap:12px}
+#login h1{margin:0 0 4px;font-size:20px}
+#loginErr{color:var(--bad);min-height:20px;font-size:13px}
+
+/* layout */
+header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header .host{font-weight:600;font-size:16px}
+header .os{color:var(--muted);font-size:12px}
+nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+nav button{background:none;border:0;padding:8px 12px;border-radius:8px;color:var(--muted)}
+nav button.active{background:var(--chip);color:var(--text);font-weight:600}
+main{padding:20px;max-width:1300px;margin:0 auto}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.card h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+.big{font-size:28px;font-weight:650;font-variant-numeric:tabular-nums}
+.sub{color:var(--muted);font-size:12px}
+.bar{height:8px;background:var(--chip);border-radius:6px;overflow:hidden;margin-top:8px}
+.bar>i{display:block;height:100%;background:var(--ok);transition:width .4s}
+canvas{width:100%;height:160px;display:block}
+.wide{grid-column:1/-1}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+.toolbar input[type=search]{flex:1;min-width:180px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.tablewrap{overflow:auto;max-height:70vh}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--chip)}
+.pill.running,.pill.active,.pill.Information{color:var(--ok)}
+.pill.stopped,.pill.inactive,.pill.failed,.pill.Error,.pill.Critical{color:var(--bad)}
+.pill.Warning,.pill.start_pending,.pill.stop_pending{color:var(--warn)}
+.pill.Active,.pill.ESTABLISHED,.pill.LISTEN,.pill.up{color:var(--ok)}
+.pill.Disconnected,.pill.Idle,.pill.TIME_WAIT,.pill.CLOSE_WAIT{color:var(--warn)}
+.pill.down{color:var(--bad)}
+tr.sel td{background:var(--chip)}
+tr.dim td{color:var(--muted)}
+.section-title{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:18px 0 8px}
+.section-title h3{margin:0}
+/* terminal: always dark, like a console window */
+#termOut{background:#0c0c0c;color:#d4d4d4;font:13px/1.45 Consolas,"Cascadia Mono",Menlo,monospace;margin:0;padding:12px;border-radius:10px 10px 0 0;
+  height:60vh;overflow:auto;white-space:pre-wrap;word-break:break-word}
+#termOut .cmd{color:#6fc3ff}
+#termOut .err{color:#ff7b72}
+#termForm{display:flex;align-items:center;gap:6px;background:#0c0c0c;color:#d4d4d4;padding:8px 12px;border-radius:0 0 10px 10px;border-top:1px solid #2a2a2a;
+  font:13px Consolas,"Cascadia Mono",Menlo,monospace}
+#termPrompt{white-space:nowrap;color:#9ccc65;max-width:50%;overflow:hidden;text-overflow:ellipsis}
+#termIn{flex:1;min-width:0;background:transparent;border:0;color:#fff;font:inherit;padding:4px 0;outline:none}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:5px 10px;border-radius:7px;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+.msg{white-space:pre-wrap;word-break:break-word;max-width:640px}
+#toast{position:fixed;right:16px;bottom:16px;background:var(--text);color:var(--bg);padding:10px 14px;border-radius:10px;max-width:420px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+@media (max-width:640px){main{padding:12px}header{padding:10px 12px}nav{margin-left:0}}
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <form id="loginForm">
+    <h1>Server Monitor</h1>
+    <div class="sub">Sign in to manage this server</div>
+    <input id="u" placeholder="Username" autocomplete="username" required>
+    <input id="p" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button class="btn primary" style="padding:10px">Sign in</button>
+    <div id="loginErr"></div>
+  </form>
+</section>
+
+<section id="app" class="hidden">
+  <header>
+    <div>
+      <div class="host" id="host">…</div>
+      <div class="os" id="os"></div>
+    </div>
+    <nav id="tabs">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="services">Services</button>
+      <button data-tab="events">Events</button>
+      <button data-tab="processes">Processes</button>
+      <button data-tab="users">Users</button>
+      <button data-tab="network">Network</button>
+      <button data-tab="terminal">Terminal</button>
+      <button data-tab="update">Update</button>
+      <button data-tab="audit">Activity log</button>
+    </nav>
+    <button class="btn" id="logout">Sign out</button>
+  </header>
+
+  <main>
+    <!-- OVERVIEW -->
+    <div id="tab-overview">
+      <div class="grid">
+        <div class="card"><h3>CPU</h3><div class="big" id="cpu">–</div><div class="sub" id="cpuSub"></div><div class="bar"><i id="cpuBar"></i></div></div>
+        <div class="card"><h3>Memory</h3><div class="big" id="mem">–</div><div class="sub" id="memSub"></div><div class="bar"><i id="memBar"></i></div></div>
+        <div class="card"><h3>Network</h3><div class="big" id="net" style="font-size:20px">–</div><div class="sub">download / upload</div></div>
+        <div class="card"><h3>Uptime</h3><div class="big" id="uptime">–</div><div class="sub" id="boot"></div></div>
+        <div class="card wide">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h3>CPU &amp; memory, last 6 minutes</h3>
+            <div class="legend"><span><i style="background:var(--accent)"></i>CPU</span><span><i style="background:var(--warn)"></i>Memory</span></div></div>
+          <canvas id="chart"></canvas>
+        </div>
+        <div class="card wide"><h3>Disks</h3><div id="disks" class="grid"></div></div>
+        <div class="card wide"><h3>Recent errors &amp; warnings (System log)</h3><div class="tablewrap" style="max-height:320px"><table id="recentEvents"></table></div></div>
+      </div>
+    </div>
+
+    <!-- SERVICES -->
+    <div id="tab-services" class="hidden card">
+      <div class="toolbar">
+        <input type="search" id="svcSearch" placeholder="Search services…">
+        <select id="svcFilter"><option value="">All</option><option value="running">Running</option><option value="stopped">Stopped</option><option value="auto">Automatic but stopped</option></select>
+        <button class="btn" id="svcRefresh">Refresh</button>
+        <span class="sub" id="svcCount"></span>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Service</th><th>Status</th><th>Startup</th><th>Actions</th></tr></thead>
+        <tbody id="svcBody"></tbody>
+      </table></div>
+    </div>
+
+    <!-- EVENTS -->
+    <div id="tab-events" class="hidden card">
+      <div class="toolbar">
+        <select id="evLog"></select>
+        <select id="evLevel">
+          <option value="warning">Warnings &amp; errors</option>
+          <option value="error">Errors only</option>
+          <option value="critical">Critical only</option>
+          <option value="all">Everything</option>
+        </select>
+        <select id="evCount"><option>50</option><option selected>100</option><option>250</option><option>500</option></select>
+        <input type="search" id="evSearch" placeholder="Filter text…">
+        <button class="btn" id="evRefresh">Refresh</button>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Time</th><th>Level</th><th>Source</th><th>ID</th><th>Message</th></tr></thead>
+        <tbody id="evBody"></tbody>
+      </table></div>
+    </div>
+
+    <!-- PROCESSES -->
+    <div id="tab-processes" class="hidden card">
+      <div class="toolbar">
+        <select id="procSort"><option value="mem">Sort by memory</option><option value="cpu">Sort by CPU</option></select>
+        <button class="btn" id="procRefresh">Refresh</button>
+        <span class="sub">Top 50 processes</span>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Name</th><th>PID</th><th>User</th><th class="num">CPU %</th><th class="num">Memory</th><th></th></tr></thead>
+        <tbody id="procBody"></tbody>
+      </table></div>
+    </div>
+
+    <!-- USERS (RDP sessions) -->
+    <div id="tab-users" class="hidden card">
+      <div class="toolbar">
+        <button class="btn" id="sesRefresh">Refresh</button>
+        <span class="sub" id="sesCount"></span>
+        <span style="margin-left:auto"></span>
+        <input id="rdpUser" placeholder="Username (optional)" style="width:190px">
+        <button class="btn primary" id="rdpBtn" title="Downloads a .rdp file - open it to connect with Windows Remote Desktop">Open Remote Desktop</button>
+      </div>
+      <div class="tablewrap" style="max-height:40vh"><table>
+        <thead><tr><th>User</th><th>Session</th><th>Status</th><th>Connected from</th><th>Signed in</th><th>Idle</th>
+          <th class="num">Programs</th><th class="num">CPU %</th><th class="num">Memory</th><th>Actions</th></tr></thead>
+        <tbody id="sesBody"></tbody>
+      </table></div>
+      <div id="sesProcs" class="hidden">
+        <div class="section-title">
+          <h3 id="sesProcsTitle"></h3>
+          <div class="toolbar" style="margin:0">
+            <input type="search" id="sesProcSearch" placeholder="Filter programs…">
+            <label class="sub"><input type="checkbox" id="sesProcAll"> Show Windows background processes</label>
+          </div>
+        </div>
+        <div class="tablewrap" style="max-height:45vh"><table>
+          <thead><tr><th>Program</th><th>PID</th><th>Status</th><th>Started</th><th class="num">CPU %</th><th class="num">Memory</th><th></th></tr></thead>
+          <tbody id="sesProcBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- NETWORK -->
+    <div id="tab-network" class="hidden">
+      <div class="card">
+        <div class="section-title" style="margin-top:0">
+          <h3>Connectivity</h3>
+          <div class="toolbar" style="margin:0">
+            <input id="pingHost" placeholder="IP or host name to ping" style="min-width:200px">
+            <button class="btn" id="pingBtn">Ping</button>
+            <button class="btn primary" id="checkBtn">Test again</button>
+          </div>
+        </div>
+        <div id="netCheck" class="grid"></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Network adapters</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Adapter</th><th>Status</th><th>IP address</th><th>MAC</th><th class="num">Speed</th>
+            <th class="num">Download</th><th class="num">Upload</th><th class="num">Received</th><th class="num">Sent</th><th class="num">Errors</th></tr></thead>
+          <tbody id="nicBody"></tbody>
+        </table></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="section-title" style="margin-top:0">
+          <h3>Connections</h3>
+          <div class="toolbar" style="margin:0">
+            <input type="search" id="connSearch" placeholder="Filter by IP, port or program…">
+            <span class="sub" id="connSummary"></span>
+          </div>
+        </div>
+        <div class="tablewrap" style="max-height:45vh"><table>
+          <thead><tr><th>Program</th><th>PID</th><th>Remote address</th><th>Local address</th><th>Status</th></tr></thead>
+          <tbody id="connBody"></tbody>
+        </table></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Listening ports</h3>
+        <div class="tablewrap" style="max-height:40vh"><table>
+          <thead><tr><th class="num">Port</th><th>Protocol</th><th>Address</th><th>Program</th><th>PID</th></tr></thead>
+          <tbody id="listenBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- TERMINAL -->
+    <div id="tab-terminal" class="hidden card">
+      <div class="toolbar">
+        <select id="termShell"></select>
+        <button class="btn" id="termClear">Clear</button>
+        <span class="sub" id="termInfo"></span>
+      </div>
+      <pre id="termOut"></pre>
+      <form id="termForm" autocomplete="off"><span id="termPrompt"></span><input id="termIn" spellcheck="false" autocapitalize="off" placeholder="Type a command and press Enter"></form>
+    </div>
+
+    <!-- UPDATE -->
+    <div id="tab-update" class="hidden card" style="max-width:820px">
+      <h3>Software version</h3>
+      <div id="updInfo" class="sub">Loading…</div>
+      <div class="toolbar" style="margin-top:14px">
+        <button class="btn" id="updCheck">Check for updates</button>
+        <button class="btn primary" id="updPull">Pull update &amp; restart</button>
+        <button class="btn" id="updRestart">Restart Server Monitor</button>
+      </div>
+      <div id="updStatus" style="margin-top:6px"></div>
+      <div id="updIncoming"></div>
+    </div>
+
+    <!-- AUDIT -->
+    <div id="tab-audit" class="hidden card">
+      <div class="toolbar"><button class="btn" id="auditRefresh">Refresh</button><span class="sub">Every sign-in, service action, end task, user log off and terminal command done through this page</span></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Time</th><th>User</th><th>From IP</th><th>Action</th><th>Target</th><th>Result</th></tr></thead>
+        <tbody id="auditBody"></tbody>
+      </table></div>
+    </div>
+  </main>
+</section>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const bytes = n => { const u=["B","KB","MB","GB","TB"]; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++} return n.toFixed(i?1:0)+" "+u[i]; };
+const dur = s => { const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m`; };
+const barColor = p => p>90?"var(--bad)":p>75?"var(--warn)":"var(--ok)";
+
+function toast(t, ms=3500){ const el=$("#toast"); el.textContent=t; el.classList.add("show"); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove("show"),ms); }
+
+async function api(path, opts={}) {
+  const r = await fetch(path, {credentials:"same-origin", ...opts,
+    headers:{"Content-Type":"application/json","X-Requested-With":"fetch", ...(opts.headers||{})}});
+  if (r.status === 401 && path !== "/api/login") { showLogin(); throw new Error("Signed out"); }
+  const data = await r.json().catch(()=>({}));
+  if (!r.ok) throw Object.assign(new Error(data.error || r.statusText), {data});
+  return data;
+}
+
+/* ---------- auth ---------- */
+let timer;
+function showLogin(){ clearInterval(timer); $("#app").classList.add("hidden"); $("#login").classList.remove("hidden"); $("#u").focus(); }
+function showApp(){ $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); loadStats(); loadRecentEvents(); timer=setInterval(tick,3000); }
+$("#loginForm").onsubmit = async e => {
+  e.preventDefault(); $("#loginErr").textContent="";
+  try { await api("/api/login",{method:"POST",body:JSON.stringify({username:$("#u").value,password:$("#p").value})}); $("#p").value=""; showApp(); }
+  catch(err){ $("#loginErr").textContent=err.message; }
+};
+$("#logout").onclick = async () => { await api("/api/logout",{method:"POST"}).catch(()=>{}); showLogin(); };
+
+/* ---------- tabs ---------- */
+let current="overview";
+const loaders = {services:loadServices, events:loadEvents, processes:loadProcesses, audit:loadAudit,
+  users:loadSessions, network:()=>{ loadNetwork(); checkNetwork(); }, terminal:loadTerminal, update:()=>loadUpdate(true)};
+$("#tabs").onclick = e => {
+  const b=e.target.closest("button"); if(!b) return;
+  document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("active",x===b));
+  current=b.dataset.tab;
+  document.querySelectorAll("main>div").forEach(d=>d.classList.toggle("hidden", d.id!=="tab-"+current));
+  loaders[current]?.();
+};
+function tick(){ if(document.hidden) return; if(current==="overview") loadStats(); if(current==="processes") loadProcesses();
+  if(current==="users") loadSessions(); if(current==="network") loadNetwork(); }
+
+/* ---------- overview ---------- */
+async function loadStats(){
+  const s = await api("/api/stats").catch(()=>null); if(!s) return;
+  $("#host").textContent=s.host; $("#os").textContent=s.os; document.title=s.host+" · Server Monitor";
+  $("#cpu").textContent=s.cpu.toFixed(0)+"%"; $("#cpuSub").textContent=s.cpu_count+" logical cores";
+  $("#cpuBar").style.width=s.cpu+"%"; $("#cpuBar").style.background=barColor(s.cpu);
+  $("#mem").textContent=s.mem.percent.toFixed(0)+"%"; $("#memSub").textContent=bytes(s.mem.used)+" of "+bytes(s.mem.total);
+  $("#memBar").style.width=s.mem.percent+"%"; $("#memBar").style.background=barColor(s.mem.percent);
+  const last=s.history.at(-1); $("#net").textContent = last ? `↓ ${bytes(last.rx)}/s  ↑ ${bytes(last.tx)}/s` : "–";
+  $("#uptime").textContent=dur(s.uptime); $("#boot").textContent="since "+s.boot.replace("T"," ");
+  $("#disks").innerHTML = s.disks.map(d=>`<div><div style="display:flex;justify-content:space-between"><b>${esc(d.mount)}</b><span class="sub">${bytes(d.used)} / ${bytes(d.total)}</span></div>
+    <div class="bar"><i style="width:${d.percent}%;background:${barColor(d.percent)}"></i></div><div class="sub">${d.percent.toFixed(0)}% used · ${esc(d.fs)}</div></div>`).join("");
+  drawChart(s.history);
+}
+function drawChart(h){
+  const c=$("#chart"), dpr=devicePixelRatio||1, w=c.clientWidth, ht=c.clientHeight;
+  c.width=w*dpr; c.height=ht*dpr; const g=c.getContext("2d"); g.scale(dpr,dpr);
+  const cs=getComputedStyle(document.documentElement), line=cs.getPropertyValue("--line"), muted=cs.getPropertyValue("--muted");
+  g.clearRect(0,0,w,ht); g.font="11px system-ui"; g.fillStyle=muted; g.strokeStyle=line; g.lineWidth=1;
+  const pad=28;
+  [0,50,100].forEach(v=>{const y=ht-6-(ht-12)*v/100; g.beginPath(); g.moveTo(pad,y); g.lineTo(w,y); g.stroke(); g.fillText(v+"%",0,y+4);});
+  const N=120, x=i=>pad+(w-pad)*(i+N-h.length)/(N-1);
+  [["cpu","--accent"],["mem","--warn"]].forEach(([k,col])=>{
+    g.strokeStyle=cs.getPropertyValue(col); g.lineWidth=2; g.beginPath();
+    h.forEach((p,i)=>{const y=ht-6-(ht-12)*p[k]/100; i?g.lineTo(x(i),y):g.moveTo(x(i),y);}); g.stroke();
+  });
+}
+async function loadRecentEvents(){
+  const r=await api("/api/events?log=System&level=warning&count=10").catch(()=>({events:[]}));
+  $("#recentEvents").innerHTML = r.events.length ? r.events.map(evRow).join("") : `<tr><td class="sub">No recent warnings or errors 👍</td></tr>`;
+}
+
+/* ---------- services ---------- */
+let services=[];
+async function loadServices(){
+  $("#svcBody").innerHTML=`<tr><td colspan="4" class="sub">Loading…</td></tr>`;
+  services = await api("/api/services").catch(e=>{toast(e.message);return [];});
+  renderServices();
+}
+function renderServices(){
+  const q=$("#svcSearch").value.toLowerCase(), f=$("#svcFilter").value;
+  const list=services.filter(s=>{
+    if(q && !(s.name+" "+s.display).toLowerCase().includes(q)) return false;
+    if(f==="running") return s.status==="running"||s.status==="active";
+    if(f==="stopped") return s.status!=="running"&&s.status!=="active";
+    if(f==="auto") return s.start==="automatic"&&s.status!=="running";
+    return true;
+  });
+  $("#svcCount").textContent=`${list.length} of ${services.length}`;
+  $("#svcBody").innerHTML=list.map(s=>{
+    const run=s.status==="running"||s.status==="active", dis=s.controllable?"":"disabled title='Protected service'";
+    return `<tr><td><b>${esc(s.display)}</b><div class="sub">${esc(s.name)}</div></td>
+      <td><span class="pill ${esc(s.status)}">${esc(s.status)}</span></td><td>${esc(s.start)}</td>
+      <td><div class="actions">
+        <button class="btn primary" data-a="restart" data-n="${esc(s.name)}" ${dis}>Restart</button>
+        ${run?`<button class="btn" data-a="stop" data-n="${esc(s.name)}" ${dis}>Stop</button>`
+             :`<button class="btn" data-a="start" data-n="${esc(s.name)}" ${dis}>Start</button>`}
+      </div></td></tr>`;
+  }).join("") || `<tr><td colspan="4" class="sub">No services match</td></tr>`;
+}
+$("#svcSearch").oninput=renderServices; $("#svcFilter").onchange=renderServices; $("#svcRefresh").onclick=loadServices;
+$("#svcBody").onclick = async e=>{
+  const b=e.target.closest("button[data-a]"); if(!b) return;
+  const {a,n}=b.dataset;
+  if(!confirm(`${a[0].toUpperCase()+a.slice(1)} service "${n}"?`)) return;
+  b.closest(".actions").querySelectorAll("button").forEach(x=>x.disabled=true); b.textContent="Working…";
+  try{
+    const r=await api(`/api/services/${encodeURIComponent(n)}/${a}`,{method:"POST"});
+    const i=services.findIndex(s=>s.name===n); if(i>=0) services[i]=r.service;
+    toast(`✔ ${n}: ${a} done — now ${r.service.status}`);
+  }catch(err){ toast(`✖ ${n}: ${err.message}`,7000); if(err.data?.service){const i=services.findIndex(s=>s.name===n); services[i]=err.data.service;} }
+  renderServices();
+};
+
+/* ---------- events ---------- */
+let events=[];
+const evRow=e=>`<tr><td style="white-space:nowrap">${esc(e.time.replace("T"," "))}</td><td><span class="pill ${esc(e.level)}">${esc(e.level)}</span></td>
+  <td>${esc(e.source)}</td><td>${esc(e.id)}</td><td class="msg">${esc(e.message)}</td></tr>`;
+async function loadEvents(){
+  $("#evBody").innerHTML=`<tr><td colspan="5" class="sub">Loading…</td></tr>`;
+  const log=$("#evLog").value||"System";
+  const r=await api(`/api/events?log=${encodeURIComponent(log)}&level=${$("#evLevel").value}&count=${$("#evCount").value}`).catch(e=>{toast(e.message);return {events:[],logs:[]};});
+  if(!$("#evLog").options.length && r.logs) $("#evLog").innerHTML=r.logs.map(l=>`<option>${esc(l)}</option>`).join("");
+  events=r.events; renderEvents();
+}
+function renderEvents(){
+  const q=$("#evSearch").value.toLowerCase();
+  const list=events.filter(e=>!q||(e.source+" "+e.message+" "+e.id).toLowerCase().includes(q));
+  $("#evBody").innerHTML=list.map(evRow).join("")||`<tr><td colspan="5" class="sub">No events</td></tr>`;
+}
+["#evLog","#evLevel","#evCount"].forEach(s=>$(s).onchange=loadEvents);
+$("#evSearch").oninput=renderEvents; $("#evRefresh").onclick=loadEvents;
+
+/* ---------- processes ---------- */
+async function loadProcesses(){
+  const p=await api("/api/processes?sort="+$("#procSort").value).catch(()=>[]);
+  $("#procBody").innerHTML=p.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.pid}</td><td class="sub">${esc(x.user)}</td>
+    <td class="num">${x.cpu.toFixed(1)}</td><td class="num">${bytes(x.mem)}</td>
+    <td><button class="btn" data-pid="${x.pid}" data-n="${esc(x.name)}" ${x.killable?"":"disabled title='Protected process'"}>End task</button></td></tr>`).join("");
+}
+$("#procSort").onchange=loadProcesses; $("#procRefresh").onclick=loadProcesses;
+$("#procBody").onclick = async e=>{
+  const b=e.target.closest("button[data-pid]"); if(!b) return;
+  const {pid,n}=b.dataset;
+  if(!confirm(`End task "${n}" (PID ${pid})?\nUnsaved data in this program will be lost.`)) return;
+  b.disabled=true; b.textContent="Ending…";
+  try{
+    await api(`/api/processes/${pid}/kill`,{method:"POST",body:JSON.stringify({name:n})});
+    toast(`✔ ${n} (PID ${pid}) ended`);
+  }catch(err){ toast(`✖ ${n}: ${err.message}`,7000); }
+  loadProcesses();
+};
+
+/* ---------- users (RDP sessions) ---------- */
+let sessions=[], selSession=null, sesProcs=[];
+const idleText = v => typeof v==="number" ? (v<60 ? "–" : dur(v)) : (v||"–");
+async function loadSessions(){
+  const r=await api("/api/sessions").catch(e=>{toast(e.message);return {sessions:[],supported:true};});
+  sessions=r.sessions;
+  $("#sesCount").textContent=`${sessions.length} user session${sessions.length===1?"":"s"}`+(r.supported?"":" · log off / disconnect only work on Windows");
+  $("#sesBody").innerHTML=sessions.map(s=>{
+    const dis=s.own?"disabled title='Server Monitor runs in this session'":"";
+    const who = s.signed_in===false ? `<i class="sub">No one signed in</i><div class="sub">at the sign-in screen</div>` : `<b>${esc(s.user)}</b>`;
+    return `<tr class="${s.id===selSession?"sel":""}"><td>${who}</td><td>${esc(s.session||"–")}<div class="sub">ID ${s.id}${s.protocol?" · "+esc(s.protocol):""}</div></td>
+      <td><span class="pill ${esc(s.state)}">${esc(s.state)}</span></td>
+      <td>${esc(s.client||"–")}<div class="sub">${esc(s.ip)}</div></td>
+      <td style="white-space:nowrap">${esc((s.logon||"–").replace("T"," "))}</td><td>${esc(idleText(s.idle))}</td>
+      <td class="num">${s.procs}</td><td class="num">${s.cpu.toFixed(1)}</td><td class="num">${bytes(s.mem)}</td>
+      <td><div class="actions">
+        <button class="btn primary" data-a="programs" data-id="${s.id}">Programs</button>
+        ${r.supported?`<button class="btn" data-a="rdp" data-id="${s.id}" title="Open Remote Desktop to this server as ${esc(s.user)}">Connect</button>`:""}
+        ${r.supported?`${s.state!=="Disconnected"?`<button class="btn" data-a="disconnect" data-id="${s.id}" ${dis}>Disconnect</button>`:""}
+        <button class="btn" data-a="logoff" data-id="${s.id}" ${dis} style="color:var(--bad)">Log off</button>`:""}
+      </div></td></tr>`;
+  }).join("") || `<tr><td colspan="10" class="sub">No users signed in</td></tr>`;
+  if(selSession!==null && !sessions.some(s=>s.id===selSession)){ selSession=null; $("#sesProcs").classList.add("hidden"); }
+  if(selSession!==null) loadSessionProcs();
+}
+async function loadSessionProcs(){
+  const s=sessions.find(x=>x.id===selSession); if(!s) return;
+  $("#sesProcsTitle").textContent=`Programs of ${s.user} (session ${s.id})`;
+  sesProcs=await api(`/api/sessions/${s.id}/processes`).catch(()=>[]);
+  renderSessionProcs();
+}
+function renderSessionProcs(){
+  const q=$("#sesProcSearch").value.toLowerCase(), all=$("#sesProcAll").checked;
+  const list=sesProcs.filter(p=>(all||!p.system)&&(!q||(p.name+" "+p.pid).toLowerCase().includes(q)));
+  $("#sesProcBody").innerHTML=list.map(p=>{
+    const busy=p.cpu>=0.5;
+    return `<tr class="${p.system?"dim":""}"><td><b>${esc(p.name)}</b>${p.system?' <span class="sub">Windows</span>':""}</td><td>${p.pid}</td>
+      <td><span class="pill ${busy?"Active":"Idle"}">${busy?"Running · busy":"Running · idle"}</span></td>
+      <td style="white-space:nowrap">${esc(p.started.replace("T"," "))}</td>
+      <td class="num">${p.cpu.toFixed(1)}</td><td class="num">${bytes(p.mem)}</td>
+      <td><button class="btn" data-pid="${p.pid}" data-n="${esc(p.name)}" ${p.killable?"":"disabled title='Protected process'"}>End task</button></td></tr>`;
+  }).join("") || `<tr><td colspan="7" class="sub">No programs</td></tr>`;
+}
+$("#sesRefresh").onclick=loadSessions;
+function openRdp(user){
+  // the browser downloads a .rdp file; opening it starts Windows Remote Desktop (mstsc)
+  location.href="/api/rdp-file?user="+encodeURIComponent(user||"");
+  toast("Open the downloaded .rdp file to connect with Remote Desktop",6000);
+}
+$("#rdpBtn").onclick=()=>openRdp($("#rdpUser").value.trim());
+$("#rdpUser").onkeydown=e=>{ if(e.key==="Enter") $("#rdpBtn").click(); };
+$("#sesProcSearch").oninput=renderSessionProcs; $("#sesProcAll").onchange=renderSessionProcs;
+$("#sesBody").onclick = async e=>{
+  const b=e.target.closest("button[data-a]"); if(!b) return;
+  const id=+b.dataset.id, a=b.dataset.a, s=sessions.find(x=>x.id===id);
+  if(a==="programs"){ selSession=id; $("#sesProcs").classList.remove("hidden"); $("#sesProcBody").innerHTML=`<tr><td colspan="7" class="sub">Loading…</td></tr>`; loadSessions(); return; }
+  if(a==="rdp"){ openRdp(s.user); return; }
+  const msg = a==="logoff"
+    ? `Log off ${s.user} (session ${id})?\nAll their programs will be closed and UNSAVED WORK WILL BE LOST.`
+    : `Disconnect ${s.user} (session ${id})?\nTheir programs keep running and they can reconnect later.`;
+  if(!confirm(msg)) return;
+  b.disabled=true; b.textContent="Working…";
+  try{ await api(`/api/sessions/${id}/${a}`,{method:"POST"}); toast(`✔ ${s.user}: ${a==="logoff"?"logged off":"disconnected"}`); }
+  catch(err){ toast(`✖ ${s.user}: ${err.message}`,7000); }
+  setTimeout(loadSessions, 1500);
+};
+$("#sesProcBody").onclick = async e=>{
+  const b=e.target.closest("button[data-pid]"); if(!b) return;
+  const {pid,n}=b.dataset;
+  if(!confirm(`End task "${n}" (PID ${pid})?\nUnsaved data in this program will be lost.`)) return;
+  b.disabled=true; b.textContent="Ending…";
+  try{ await api(`/api/processes/${pid}/kill`,{method:"POST",body:JSON.stringify({name:n})}); toast(`✔ ${n} (PID ${pid}) ended`); }
+  catch(err){ toast(`✖ ${n}: ${err.message}`,7000); }
+  loadSessionProcs();
+};
+
+/* ---------- network ---------- */
+let conns=[];
+const rate = v => v==null ? "–" : bytes(v)+"/s";
+async function loadNetwork(){
+  const n=await api("/api/network").catch(()=>null); if(!n) return;
+  $("#nicBody").innerHTML=n.nics.map(x=>`<tr class="${x.up?"":"dim"}"><td><b>${esc(x.name)}</b></td>
+    <td><span class="pill ${x.up?"up":"down"}">${x.up?"Connected":"Disconnected"}</span></td>
+    <td>${x.ipv4.map(esc).join("<br>")||"–"}${x.ipv6.length?`<div class="sub">${x.ipv6.map(esc).join("<br>")}</div>`:""}</td>
+    <td class="sub">${esc(x.mac||"–")}</td><td class="num">${x.speed?(x.speed>=1000?(x.speed/1000).toFixed(1)+" Gbps":x.speed+" Mbps"):"–"}</td>
+    <td class="num">${rate(x.rx)}</td><td class="num">${rate(x.tx)}</td><td class="num">${bytes(x.recv)}</td><td class="num">${bytes(x.sent)}</td>
+    <td class="num" style="${x.errors+x.drops?"color:var(--bad)":""}">${x.errors+x.drops}</td></tr>`).join("");
+  const sm=n.summary;
+  $("#connSummary").textContent=`${sm.ESTABLISHED||0} established · ${sm.LISTEN||0} listening · ${(sm.TIME_WAIT||0)+(sm.CLOSE_WAIT||0)} closing`+(n.total_conns>n.conns.length?` · showing ${n.conns.length} of ${n.total_conns}`:"");
+  conns=n.conns; renderConns();
+  $("#listenBody").innerHTML=n.listening.map(l=>`<tr><td class="num"><b>${l.port}</b></td><td>${l.proto}</td><td>${esc(l.addr)}</td><td>${esc(l.process||"–")}</td><td>${l.pid??"–"}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="sub">None</td></tr>`;
+}
+function renderConns(){
+  const q=$("#connSearch").value.toLowerCase();
+  const list=conns.filter(c=>!q||`${c.process} ${c.pid} ${c.remote}:${c.rport} ${c.local} ${c.status}`.toLowerCase().includes(q));
+  $("#connBody").innerHTML=list.map(c=>`<tr><td>${esc(c.process||"–")}</td><td>${c.pid??"–"}</td><td><b>${esc(c.remote)}</b>:${c.rport}</td>
+    <td class="sub">${esc(c.local)}</td><td><span class="pill ${esc(c.status)}">${esc(c.status)}</span></td></tr>`).join("")
+    || `<tr><td colspan="5" class="sub">No connections</td></tr>`;
+}
+const checkCard = (label, host, ok, detail) => `<div><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(label)}</b>
+  <span class="pill ${ok?"up":"down"}">${ok?"OK":"Failed"}</span></div><div class="sub">${esc(host)}</div><div>${detail}</div></div>`;
+const pingDetail = p => p.ok ? `${p.ms??"<1"} ms · ${p.received}/${p.sent} replies` : `<span style="color:var(--bad)">no reply (${p.received}/${p.sent})</span>`;
+async function checkNetwork(){
+  $("#netCheck").innerHTML=`<div class="sub">Testing gateway, DNS and internet…</div>`;
+  const r=await api("/api/network/check").catch(e=>{toast(e.message);return null;}); if(!r) return;
+  const cards=r.pings.map(p=>checkCard(p.label,p.host,p.ok,pingDetail(p)));
+  if(r.lookup) cards.push(checkCard("Name lookup","www.google.com",r.lookup.ok, r.lookup.ok?`${r.lookup.ms} ms → ${esc(r.lookup.ip)}`:`<span style="color:var(--bad)">${esc(r.lookup.error)}</span>`));
+  if(!r.gateway) cards.unshift(checkCard("Gateway","none found",false,"No default route"));
+  $("#netCheck").innerHTML=cards.join("");
+}
+$("#checkBtn").onclick=checkNetwork; $("#connSearch").oninput=renderConns;
+$("#pingHost").onkeydown=e=>{ if(e.key==="Enter") $("#pingBtn").click(); };
+$("#pingBtn").onclick=async()=>{
+  const h=$("#pingHost").value.trim(); if(!h) return;
+  $("#pingBtn").disabled=true; $("#pingBtn").textContent="Pinging…";
+  try{ const r=await api("/api/network/check?host="+encodeURIComponent(h)); const p=r.pings[0];
+    toast(`${p.ok?"✔":"✖"} ${h}: ${p.ok?`${p.ms??"<1"} ms, ${p.received}/${p.sent} replies`:`no reply (${p.received}/${p.sent})`}`,6000); }
+  catch(err){ toast(`✖ ${err.message}`); }
+  $("#pingBtn").disabled=false; $("#pingBtn").textContent="Ping";
+};
+
+/* ---------- terminal ---------- */
+const SHELL_NAMES={cmd:"Command Prompt", powershell:"PowerShell", bash:"Bash"};
+let term=null, termHist=[], termPos=0, termBusy=false;
+function termPrint(text, cls=""){
+  const o=$("#termOut"), s=document.createElement("span");
+  if(cls) s.className=cls; s.textContent=text+"\n"; o.appendChild(s); o.scrollTop=o.scrollHeight;
+}
+function termSetPrompt(){
+  const sh=$("#termShell").value, cwd=term.cwd[sh];
+  $("#termPrompt").textContent = sh==="powershell" ? `PS ${cwd}>` : sh==="cmd" ? `${cwd}>` : `${cwd}$`;
+  $("#termPrompt").title=cwd;
+}
+async function loadTerminal(){
+  if(!term){
+    term=await api("/api/terminal").catch(e=>{toast(e.message);return null;}); if(!term) return;
+    $("#termShell").innerHTML=term.shells.map(s=>`<option value="${s}">${SHELL_NAMES[s]||s}</option>`).join("");
+    $("#termInfo").textContent=`Runs on the server as ${term.user} · each command may run up to ${term.timeout/60} min · programs that wait for typed input are not supported · every command is written to the Activity log`;
+    if(!term.enabled){ termPrint('The terminal is turned off. Set "terminal_enabled": true in config.json and restart Server Monitor.',"err"); $("#termIn").disabled=true; }
+    else termPrint(`${SHELL_NAMES[term.shells[0]]} on the server. Type "cls" to clear, ↑/↓ for previous commands.`,"sub");
+  }
+  termSetPrompt(); $("#termIn").focus();
+}
+$("#termShell").onchange=()=>{ termSetPrompt(); termPrint(`--- switched to ${SHELL_NAMES[$("#termShell").value]} ---`,"sub"); $("#termIn").focus(); };
+$("#termClear").onclick=()=>{ $("#termOut").textContent=""; $("#termIn").focus(); };
+$("#termForm").onsubmit=async e=>{
+  e.preventDefault(); if(termBusy) return;
+  const cmd=$("#termIn").value, sh=$("#termShell").value; $("#termIn").value="";
+  if(cmd.trim()){ termHist.push(cmd); } termPos=termHist.length;
+  termPrint($("#termPrompt").textContent+" "+cmd,"cmd");
+  if(/^\s*(cls|clear|clear-host)\s*$/i.test(cmd)){ $("#termOut").textContent=""; return; }
+  if(!cmd.trim()) return;
+  termBusy=true; $("#termIn").disabled=true; $("#termPrompt").textContent="Running…";
+  try{
+    const r=await api("/api/terminal",{method:"POST",body:JSON.stringify({shell:sh,command:cmd})});
+    if(r.output) termPrint(r.output); term.cwd[sh]=r.cwd;
+  }catch(err){ termPrint(err.message,"err"); }
+  termBusy=false; $("#termIn").disabled=false; termSetPrompt(); $("#termIn").focus();
+};
+$("#termIn").onkeydown=e=>{
+  if(e.key==="ArrowUp"&&termPos>0){ termPos--; $("#termIn").value=termHist[termPos]; e.preventDefault(); }
+  if(e.key==="ArrowDown"){ termPos=Math.min(termPos+1,termHist.length); $("#termIn").value=termHist[termPos]||""; e.preventDefault(); }
+};
+$("#termOut").onclick=()=>{ if(!getSelection().toString()) $("#termIn").focus(); };
+
+/* ---------- update ---------- */
+async function loadUpdate(fetch=true){
+  $("#updStatus").innerHTML=`<span class="sub">${fetch?"Checking GitHub…":""}</span>`;
+  const u=await api("/api/update"+(fetch?"":"?fetch=0")).catch(e=>({error:e.message}));
+  $("#updInfo").innerHTML = u.commit
+    ? `<b>${esc(u.commit)}</b> · ${esc((u.date||"").replace("T"," ").slice(0,16))} · ${esc(u.message)}<div class="sub">Branch ${esc(u.branch)} · ${esc(u.repo_url||"")}</div>`
+    : `<span class="sub">Not linked to GitHub yet</span>`;
+  let st;
+  if(u.error) st=`<span class="pill failed">${esc(u.error)}</span>`;
+  else if(u.behind===0) st=`<span class="pill running">✔ Up to date</span>`;
+  else if(u.behind>0) st=`<span class="pill Warning">${u.behind} update${u.behind>1?"s":""} available</span>`;
+  else st="";
+  if(u.supervised===false) st+=`<div class="sub" style="margin-top:6px">Started without start.bat, so the page cannot restart it. Run start.bat to enable updates from here.</div>`;
+  $("#updStatus").innerHTML=st;
+  $("#updIncoming").innerHTML = u.incoming?.length
+    ? `<div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>New in GitHub</th><th>Date</th></tr></thead><tbody>${
+        u.incoming.map(c=>`<tr><td><b>${esc(c.commit)}</b> ${esc(c.message)}</td><td style="white-space:nowrap">${esc(c.date.replace("T"," ").slice(0,16))}</td></tr>`).join("")}</tbody></table></div>` : "";
+  ["#updPull","#updRestart"].forEach(s=>$(s).disabled=u.supervised===false);
+}
+async function waitForRestart(){
+  $("#updStatus").innerHTML=`<span class="sub">Restarting Server Monitor… the page reloads by itself.</span>`;
+  await new Promise(r=>setTimeout(r,3000));
+  for(let i=0;i<45;i++){
+    try{ const r=await fetch("/api/me",{credentials:"same-origin"}); if(r.ok){ location.reload(); return; } }catch(e){}
+    await new Promise(r=>setTimeout(r,2000));
+  }
+  $("#updStatus").innerHTML=`<span class="pill failed">Server Monitor did not come back after 90 seconds - check the server.</span>`;
+}
+$("#updCheck").onclick=()=>loadUpdate(true);
+$("#updPull").onclick=async()=>{
+  if(!confirm("Download the latest version from GitHub and restart Server Monitor?\nThe page is unavailable for a few seconds.")) return;
+  $("#updPull").disabled=true; $("#updStatus").innerHTML=`<span class="sub">Downloading update…</span>`;
+  try{
+    const r=await api("/api/update/pull",{method:"POST"});
+    if(r.restarting) return waitForRestart();
+    toast("Already up to date - nothing to install"); loadUpdate(false);
+  }catch(err){ $("#updStatus").innerHTML=`<span class="pill failed" style="white-space:pre-wrap">${esc(err.message)}</span>`; }
+  $("#updPull").disabled=false;
+};
+$("#updRestart").onclick=async()=>{
+  if(!confirm("Restart Server Monitor now?")) return;
+  try{ await api("/api/update/restart",{method:"POST"}); waitForRestart(); }catch(err){ toast("✖ "+err.message,7000); }
+};
+
+/* ---------- audit ---------- */
+async function loadAudit(){
+  const a=await api("/api/audit").catch(()=>[]);
+  $("#auditBody").innerHTML=a.map(x=>`<tr><td style="white-space:nowrap">${esc(x.time.replace("T"," "))}</td><td>${esc(x.user)}</td><td>${esc(x.ip)}</td>
+    <td>${esc(x.action)}</td><td>${esc(x.target)}</td><td>${x.ok?'<span class="pill running">ok</span>':`<span class="pill failed" title="${esc(x.detail)}">failed</span>`}</td></tr>`).join("")
+    ||`<tr><td colspan="6" class="sub">Nothing yet</td></tr>`;
+}
+$("#auditRefresh").onclick=loadAudit;
+addEventListener("resize",()=>current==="overview"&&loadStats());
+
+/* ---------- start ---------- */
+api("/api/me").then(r=>r.user?showApp():showLogin()).catch(showLogin);
+</script>
+</body>
+</html>

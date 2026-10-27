@@ -1,0 +1,12 @@
+# Per-server files - never commit (config.json holds the password hash and secret key)
+config.json
+audit.log
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Archives / local copies
+*.rar
+*.zip
