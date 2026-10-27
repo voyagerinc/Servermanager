@@ -948,19 +948,17 @@ def apply_update():
             log.append(out)
             if not ok:
                 return False, False, "\n".join(log)
-        old = ""
+        old, branch = "", "main"
     else:
-        old = git("rev-parse", "HEAD")[1]
-    branch = _branch()
+        old, branch = git("rev-parse", "HEAD")[1], _branch()
     ok, out = git("fetch", "--quiet", "origin", branch, timeout=120)
     if not ok:
         return False, False, "Could not download from GitHub: " + out
     # servers never have their own edits to the program files, so take GitHub's version as-is
-    ok, out = git("reset", "--hard", f"origin/{branch}")
+    ok, out = git("checkout", "--quiet", "--force", "-B", branch, "--track", f"origin/{branch}")
     log.append(out)
     if not ok:
         return False, False, "\n".join(log)
-    git("branch", f"--set-upstream-to=origin/{branch}")
     new = git("rev-parse", "HEAD")[1]
     changed = new != old
     if changed:
