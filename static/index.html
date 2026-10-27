@@ -294,6 +294,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const bytes = n => { const u=["B","KB","MB","GB","TB"]; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++} return n.toFixed(i?1:0)+" "+u[i]; };
 const dur = s => { const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m`; };
+const memCell = x => `${bytes(x.mem)}<span class="sub"> · ${(x.mem_pct??0).toFixed(1)}%</span>`;
 const barColor = p => p>90?"var(--bad)":p>75?"var(--warn)":"var(--ok)";
 
 function toast(t, ms=3500){ const el=$("#toast"); el.textContent=t; el.classList.add("show"); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove("show"),ms); }
@@ -429,7 +430,7 @@ $("#evSearch").oninput=renderEvents; $("#evRefresh").onclick=loadEvents;
 async function loadProcesses(){
   const p=await api("/api/processes?sort="+$("#procSort").value).catch(()=>[]);
   $("#procBody").innerHTML=p.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.pid}</td><td class="sub">${esc(x.user)}</td>
-    <td class="num">${x.cpu.toFixed(1)}</td><td class="num">${bytes(x.mem)}</td>
+    <td class="num">${x.cpu.toFixed(1)}</td><td class="num" style="white-space:nowrap">${memCell(x)}</td>
     <td><button class="btn" data-pid="${x.pid}" data-n="${esc(x.name)}" ${x.killable?"":"disabled title='Protected process'"}>End task</button></td></tr>`).join("");
 }
 $("#procSort").onchange=loadProcesses; $("#procRefresh").onclick=loadProcesses;
@@ -459,7 +460,7 @@ async function loadSessions(){
       <td><span class="pill ${esc(s.state)}">${esc(s.state)}</span></td>
       <td>${esc(s.client||"–")}<div class="sub">${esc(s.ip)}</div></td>
       <td style="white-space:nowrap">${esc((s.logon||"–").replace("T"," "))}</td><td>${esc(idleText(s.idle))}</td>
-      <td class="num">${s.procs}</td><td class="num">${s.cpu.toFixed(1)}</td><td class="num">${bytes(s.mem)}</td>
+      <td class="num">${s.procs}</td><td class="num">${s.cpu.toFixed(1)}</td><td class="num" style="white-space:nowrap">${memCell(s)}</td>
       <td><div class="actions">
         <button class="btn primary" data-a="programs" data-id="${s.id}">Programs</button>
         ${r.supported?`<button class="btn" data-a="rdp" data-id="${s.id}" title="Open Remote Desktop to this server as ${esc(s.user)}">Connect</button>`:""}
@@ -484,7 +485,7 @@ function renderSessionProcs(){
     return `<tr class="${p.system?"dim":""}"><td><b>${esc(p.name)}</b>${p.system?' <span class="sub">Windows</span>':""}</td><td>${p.pid}</td>
       <td><span class="pill ${busy?"Active":"Idle"}">${busy?"Running · busy":"Running · idle"}</span></td>
       <td style="white-space:nowrap">${esc(p.started.replace("T"," "))}</td>
-      <td class="num">${p.cpu.toFixed(1)}</td><td class="num">${bytes(p.mem)}</td>
+      <td class="num">${p.cpu.toFixed(1)}</td><td class="num" style="white-space:nowrap">${memCell(p)}</td>
       <td><button class="btn" data-pid="${p.pid}" data-n="${esc(p.name)}" ${p.killable?"":"disabled title='Protected process'"}>End task</button></td></tr>`;
   }).join("") || `<tr><td colspan="7" class="sub">No programs</td></tr>`;
 }

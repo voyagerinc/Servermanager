@@ -255,6 +255,7 @@ _procs_lock = threading.Lock()
 
 def take_process_snapshot():
     ncpu = psutil.cpu_count() or 1
+    total_mem = psutil.virtual_memory().total
     snap = []
     for p in psutil.process_iter(["pid", "name", "username", "cpu_percent", "memory_info", "create_time"]):
         i = p.info
@@ -264,6 +265,7 @@ def take_process_snapshot():
             "pid": i["pid"], "name": i["name"] or "", "user": i["username"] or "",
             "cpu": (i["cpu_percent"] or 0) / ncpu,  # 0-100 % of the whole machine, like Task Manager
             "mem": i["memory_info"].rss if i["memory_info"] else 0,
+            "mem_pct": (i["memory_info"].rss if i["memory_info"] else 0) * 100 / total_mem,
             "started": datetime.fromtimestamp(i["create_time"]).isoformat(timespec="seconds")
                        if i["create_time"] else "",
             "session": _session_of(i["pid"]) if IS_WINDOWS else None,
@@ -475,6 +477,7 @@ def list_sessions():
             "client": client, "ip": _wts_query(sid, WTS_CLIENT_ADDRESS) or "",
             "logon": logon.isoformat(timespec="seconds") if logon else "",
             "idle": idle, "procs": procs, "cpu": cpu, "mem": mem,
+            "mem_pct": mem * 100 / psutil.virtual_memory().total,
             "own": sid == own_sid,
         })
     return out
