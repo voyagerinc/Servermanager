@@ -295,9 +295,12 @@ def api_processes():
     procs = process_snapshot()
     key = request.args.get("sort", "mem")
     procs.sort(key=lambda x: x.get(key, 0), reverse=True)
-    for p in procs[:50]:
+    q = request.args.get("q", "").strip().lower()
+    if q:
+        procs = [p for p in procs if q in p["name"].lower() or q == str(p["pid"]) or q in p["user"].lower()]
+    for p in procs:
         p["killable"] = process_killable(p["pid"], p["name"])
-    return jsonify(procs[:50])
+    return jsonify(total=len(procs), procs=procs)
 
 
 def process_killable(pid, name):

@@ -170,9 +170,10 @@ tr.dim td{color:var(--muted)}
     <!-- PROCESSES -->
     <div id="tab-processes" class="hidden card">
       <div class="toolbar">
+        <input type="search" id="procSearch" placeholder="Search all processes by name, PID or user…">
         <select id="procSort"><option value="mem">Sort by memory</option><option value="cpu">Sort by CPU</option></select>
         <button class="btn" id="procRefresh">Refresh</button>
-        <span class="sub">Top 50 processes</span>
+        <span class="sub" id="procCount"></span>
       </div>
       <div class="tablewrap"><table>
         <thead><tr><th>Name</th><th>PID</th><th>User</th><th class="num">CPU %</th><th class="num">Memory</th><th></th></tr></thead>
@@ -428,11 +429,18 @@ $("#evSearch").oninput=renderEvents; $("#evRefresh").onclick=loadEvents;
 
 /* ---------- processes ---------- */
 async function loadProcesses(){
-  const p=await api("/api/processes?sort="+$("#procSort").value).catch(()=>[]);
+  const q=$("#procSearch").value.trim();
+  const r=await api(`/api/processes?sort=${$("#procSort").value}&q=${encodeURIComponent(q)}`).catch(()=>({procs:[],total:0}));
+  if(q!==$("#procSearch").value.trim()) return;  // the search changed while this was loading
+  const p=r.procs;
+  $("#procCount").textContent = q ? `${r.total} match${r.total===1?"":"es"}` : `${r.total} processes`;
   $("#procBody").innerHTML=p.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.pid}</td><td class="sub">${esc(x.user)}</td>
     <td class="num">${x.cpu.toFixed(1)}</td><td class="num" style="white-space:nowrap">${memCell(x)}</td>
-    <td><button class="btn" data-pid="${x.pid}" data-n="${esc(x.name)}" ${x.killable?"":"disabled title='Protected process'"}>End task</button></td></tr>`).join("");
+    <td><button class="btn" data-pid="${x.pid}" data-n="${esc(x.name)}" ${x.killable?"":"disabled title='Protected process'"}>End task</button></td></tr>`).join("")
+    || `<tr><td colspan="6" class="sub">No process matches "${esc(q)}"</td></tr>`;
 }
+let procSearchTimer;
+$("#procSearch").oninput=()=>{ clearTimeout(procSearchTimer); procSearchTimer=setTimeout(loadProcesses,250); };
 $("#procSort").onchange=loadProcesses; $("#procRefresh").onclick=loadProcesses;
 $("#procBody").onclick = async e=>{
   const b=e.target.closest("button[data-pid]"); if(!b) return;

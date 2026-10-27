@@ -6,7 +6,7 @@ network, open `http://<server-ip>:30081` in a browser to:
 - **Overview** – CPU, memory, network, uptime, disk space, a 6-minute chart, latest errors
 - **Services** – search all services, Start / Stop / Restart with one click (no RDP needed)
 - **Events** – Windows Event Log (System / Application / Security / Setup), filter by level and text
-- **Processes** – top 50 by memory or CPU, with **End task**
+- **Processes** – every process, sorted by memory or CPU, search by name / PID / user, with **End task**
 - **Users** – everyone signed in (RDP and console): status, client PC/IP, sign-in time, idle time,
   CPU/memory per user. See each user's programs, end a program, **Disconnect** or **Log off** a user.
   **Open Remote Desktop** / **Connect** downloads a `.rdp` file that opens Windows Remote Desktop to the server
