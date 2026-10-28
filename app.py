@@ -22,6 +22,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections import deque
 from datetime import datetime
 from functools import wraps
@@ -55,6 +57,10 @@ DEFAULT_CONFIG = {
     "session_minutes": 60,
     # Terminal tab: run Command Prompt / PowerShell commands on the server from the web page.
     "terminal_enabled": True,
+    # Cloud monitoring: this server connects OUT to a Server Monitor Hub (no port needs to be opened here).
+    "hub_url": "",
+    "hub_key": "",
+    "agent_id": "",
     "ssl_cert": "",
     "ssl_key": "",
 }
@@ -66,8 +72,9 @@ def load_config():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, encoding="utf-8") as f:
             cfg.update(json.load(f))
-    if not cfg["secret_key"]:
-        cfg["secret_key"] = secrets.token_hex(32)
+    if not cfg["secret_key"] or not cfg["agent_id"]:
+        cfg["secret_key"] = cfg["secret_key"] or secrets.token_hex(32)
+        cfg["agent_id"] = cfg["agent_id"] or secrets.token_hex(8)  # identifies this server at the hub
         save_config(cfg)
     return cfg
 
@@ -215,10 +222,7 @@ def sampler():
         })
 
 
-@app.get("/api/stats")
-@login_required
-def api_stats():
-    vm = psutil.virtual_memory()
+def disk_list():
     disks = []
     for p in psutil.disk_partitions(all=False):
         if "cdrom" in p.opts or not p.fstype:
@@ -229,13 +233,25 @@ def api_stats():
                           "used": u.used, "percent": u.percent})
         except (PermissionError, OSError):
             pass
-    boot = psutil.boot_time()
+    return disks
+
+
+def os_name():
     release = platform.release()
     if IS_WINDOWS and release == "10" and int(platform.version().split(".")[-1]) >= 22000:
         release = "11"  # Python reports Windows 11 as "10"
+    return f"{platform.system()} {release} ({platform.version()})"
+
+
+@app.get("/api/stats")
+@login_required
+def api_stats():
+    vm = psutil.virtual_memory()
+    disks = disk_list()
+    boot = psutil.boot_time()
     return jsonify(
         host=socket.gethostname(),
-        os=f"{platform.system()} {release} ({platform.version()})",
+        os=os_name(),
         cpu_count=psutil.cpu_count(),
         cpu=_history[-1]["cpu"] if _history else psutil.cpu_percent(0.2),
         mem={"total": vm.total, "used": vm.used, "percent": vm.percent},
@@ -1034,6 +1050,148 @@ def supervise(port=None):
             break
 
 
+# --------------------------------------------------------------------------- cloud hub agent
+# The server never accepts connections from the hub. Instead it keeps calling the hub
+# (outgoing HTTPS, like AnyDesk): it sends a status report every 10 seconds and
+# long-polls for "jobs" - page requests the hub forwards from a browser - which it
+# runs against this app locally and posts the answers back.
+_hub_state = {"status": "off", "error": "", "since": None}
+_hub_stop = threading.Event()
+_HUB_RUN = secrets.token_hex(4)  # new on every start, so the hub can tell a restarted process apart
+_summary_cache = {"t": 0.0, "services": [], "version": ""}
+
+
+def server_summary():
+    vm = psutil.virtual_memory()
+    if time.time() - _summary_cache["t"] > 60:  # services and git are slow-ish: refresh once a minute
+        try:
+            _summary_cache["services"] = [s["display"] for s in list_services()
+                                          if s["start"] == "automatic" and s["status"] != "running"]
+        except Exception:  # noqa: BLE001
+            pass
+        ok, out = git("log", "-1", "--format=%h %cs")
+        _summary_cache.update(t=time.time(), version=out if ok else "")
+    try:
+        sessions = list_sessions()
+    except Exception:  # noqa: BLE001
+        sessions = []
+    ips = [a.address for addrs in psutil.net_if_addrs().values() for a in addrs
+           if a.family == socket.AF_INET and not a.address.startswith(("127.", "169.254."))]
+    return {
+        "hostname": socket.gethostname(), "os": os_name(), "ips": ips,
+        "version": _summary_cache["version"],
+        "cpu": _history[-1]["cpu"] if _history else psutil.cpu_percent(0.2),
+        "mem": vm.percent, "mem_total": vm.total,
+        "disks": [{"mount": d["mount"], "percent": d["percent"], "free": d["total"] - d["used"]} for d in disk_list()],
+        "uptime": int(time.time() - psutil.boot_time()),
+        "users_active": sum(1 for s in sessions if s["state"] == "Active" and s.get("signed_in", True)),
+        "users_disconnected": sum(1 for s in sessions if s["state"] == "Disconnected"),
+        "stopped_services": _summary_cache["services"],
+        "net_rx": _history[-1]["rx"] if _history else 0, "net_tx": _history[-1]["tx"] if _history else 0,
+    }
+
+
+def _hub_call(path, data=None, timeout=40):
+    body = json.dumps(data).encode() if data is not None else None
+    req = urllib.request.Request(CFG["hub_url"].rstrip("/") + path, data=body,
+                                 method="POST" if body is not None else "GET",
+                                 headers={"Content-Type": "application/json", "User-Agent": "ServerMonitor-Agent",
+                                          "X-Agent-Key": CFG["hub_key"], "X-Agent-Id": CFG["agent_id"],
+                                          "X-Agent-Run": _HUB_RUN})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read() or b"{}")
+
+
+def _hub_error(e):
+    if isinstance(e, urllib.error.HTTPError):
+        return "Wrong hub key" if e.code == 403 else f"Hub answered HTTP {e.code}"
+    if isinstance(e, urllib.error.URLError):
+        return f"Cannot reach the hub: {e.reason}"
+    return str(e)
+
+
+def _hub_run_job(job):
+    """Run one forwarded browser request against this app and send the answer to the hub."""
+    try:
+        c = app.test_client()
+        with c.session_transaction() as s:
+            s["user"] = job.get("user") or "hub"
+        headers = {"Content-Type": job.get("content_type") or "application/json"}
+        if job.get("xrw"):
+            headers["X-Requested-With"] = job["xrw"]
+        r = c.open(job["path"], method=job["method"], query_string=job.get("query", ""),
+                   data=base64.b64decode(job.get("body") or ""), headers=headers,
+                   environ_base={"REMOTE_ADDR": job.get("ip") or "hub"})
+        result = {"id": job["id"], "status": r.status_code, "content_type": r.content_type,
+                  "disposition": r.headers.get("Content-Disposition", ""),
+                  "body": base64.b64encode(r.get_data()).decode()}
+    except Exception as e:  # noqa: BLE001
+        result = {"id": job["id"], "status": 502, "content_type": "application/json",
+                  "body": base64.b64encode(json.dumps({"error": f"Server error: {e}"}).encode()).decode()}
+    try:
+        _hub_call("/agent/result", result, timeout=60)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _hub_reporter(stop):
+    while not stop.is_set():
+        try:
+            _hub_call("/agent/report", server_summary(), timeout=20)
+            _hub_state.update(status="connected", error="", since=_hub_state["since"] or time.time())
+        except Exception as e:  # noqa: BLE001
+            _hub_state.update(status="error", error=_hub_error(e), since=None)
+        stop.wait(10)
+
+
+def _hub_poller(stop):
+    while not stop.is_set():
+        try:
+            jobs = _hub_call("/agent/poll", timeout=40).get("jobs", [])
+        except Exception as e:  # noqa: BLE001
+            _hub_state.update(status="error", error=_hub_error(e), since=None)
+            stop.wait(5)
+            continue
+        for job in jobs:
+            threading.Thread(target=_hub_run_job, args=(job,), daemon=True).start()
+
+
+def start_hub_agent():
+    global _hub_stop
+    _hub_stop.set()  # stop the threads of a previous hub address
+    _hub_stop = threading.Event()
+    if not CFG["hub_url"]:
+        _hub_state.update(status="off", error="", since=None)
+        return
+    _hub_state.update(status="connecting", error="", since=None)
+    for target in (_hub_reporter, _hub_poller):
+        threading.Thread(target=target, args=(_hub_stop,), daemon=True).start()
+
+
+@app.get("/api/hub")
+@login_required
+def api_hub_get():
+    return jsonify(url=CFG["hub_url"], key_set=bool(CFG["hub_key"]), agent_id=CFG["agent_id"], **_hub_state)
+
+
+@app.post("/api/hub")
+@login_required
+def api_hub_set():
+    d = request.get_json(silent=True) or {}
+    url = (d.get("url") or "").strip().rstrip("/")
+    if url and not re.match(r"^https?://[^\s/]+", url):
+        return jsonify(error="The hub address must start with https:// (or http://)"), 400
+    CFG["hub_url"] = url
+    if d.get("key"):
+        CFG["hub_key"] = d["key"].strip()
+    if url and not CFG["hub_key"]:
+        return jsonify(error="Enter the hub key"), 400
+    save_config(CFG)
+    audit("cloud hub", url or "disconnected", True)
+    start_hub_agent()
+    return jsonify(ok=True)
+
+
 # --------------------------------------------------------------------------- page
 @app.get("/")
 def index():
@@ -1075,6 +1233,7 @@ def main():
 
     threading.Thread(target=sampler, daemon=True).start()
     threading.Thread(target=process_sampler, daemon=True).start()
+    start_hub_agent()
     port = args.port or CFG["port"]
     ssl = (CFG["ssl_cert"], CFG["ssl_key"]) if CFG["ssl_cert"] else None
     print(f"Server Monitor running on http{'s' if ssl else ''}://{socket.gethostname()}:{port}")

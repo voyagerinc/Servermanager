@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Server Monitor Hub</title>
+<style>
+:root{
+  --bg:#f4f6f9;--panel:#fff;--text:#1b2330;--muted:#677386;--line:#e2e6ec;
+  --accent:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--chip:#eef1f5;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f141b;--panel:#171e28;--text:#e6ebf2;--muted:#8b97a8;--line:#263142;
+  --accent:#5b8cff;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--chip:#212a37;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;cursor:pointer}
+input,select{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.hidden{display:none!important}
+#login{min-height:100vh;display:grid;place-items:center;padding:16px}
+#login form{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;width:100%;max-width:360px;display:grid;gap:12px}
+#login h1{margin:0 0 4px;font-size:20px}
+#loginErr{color:var(--bad);min-height:20px;font-size:13px}
+header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header .title{font-weight:650;font-size:16px}
+header .sub{margin-right:auto}
+main{padding:20px;max-width:1400px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.card h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+.tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px}
+.tile .big{font-size:26px;font-weight:650;font-variant-numeric:tabular-nums}
+.sub{color:var(--muted);font-size:12px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+.toolbar input[type=search]{flex:1;min-width:180px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-size:12px;color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.tablewrap{overflow:auto}
+tr.off td{color:var(--muted)}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--chip);white-space:nowrap}
+.pill.on{color:var(--ok)} .pill.offl{color:var(--bad)} .pill.warn{color:var(--warn)}
+.meter{min-width:90px}
+.meter .bar{height:6px;background:var(--chip);border-radius:6px;overflow:hidden;margin-top:4px}
+.meter .bar>i{display:block;height:100%}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:5px 10px;border-radius:7px;font-size:13px;text-decoration:none;display:inline-block}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled,.btn.disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+.alert{color:var(--warn);font-size:12px}
+.alert.bad{color:var(--bad)}
+#toast{position:fixed;right:16px;bottom:16px;background:var(--text);color:var(--bg);padding:10px 14px;border-radius:10px;max-width:440px;opacity:0;transition:opacity .2s;pointer-events:none;white-space:pre-wrap}
+#toast.show{opacity:1}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--text);padding:22px;max-width:620px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog h2{margin:0 0 10px;font-size:18px}
+.copyrow{display:flex;gap:8px;margin:6px 0 14px}
+.copyrow input{flex:1;font-family:Consolas,Menlo,monospace;font-size:13px}
+ol{padding-left:20px;margin:8px 0}
+ol li{margin:4px 0}
+@media (max-width:640px){main{padding:12px}header{padding:10px 12px}}
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <form id="loginForm">
+    <h1>Server Monitor Hub</h1>
+    <div class="sub">All your servers on one page</div>
+    <input id="u" placeholder="Username" autocomplete="username" required>
+    <input id="p" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button class="btn primary" style="padding:10px">Sign in</button>
+    <div id="loginErr"></div>
+  </form>
+</section>
+
+<section id="app" class="hidden">
+  <header>
+    <div class="title">Server Monitor Hub</div>
+    <div class="sub" id="lastUpdate"></div>
+    <button class="btn" id="addBtn">Add server</button>
+    <button class="btn" id="auditBtn">Activity</button>
+    <button class="btn" id="logout">Sign out</button>
+  </header>
+  <main>
+    <div class="tiles">
+      <div class="card tile"><h3>Servers</h3><div class="big" id="tTotal">–</div></div>
+      <div class="card tile"><h3>Online</h3><div class="big" id="tOnline" style="color:var(--ok)">–</div></div>
+      <div class="card tile"><h3>Offline</h3><div class="big" id="tOffline">–</div></div>
+      <div class="card tile"><h3>Need attention</h3><div class="big" id="tAlert">–</div></div>
+      <div class="card tile"><h3>Users signed in</h3><div class="big" id="tUsers">–</div></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <input type="search" id="search" placeholder="Search by name, host name or IP…">
+        <select id="filter">
+          <option value="">All servers</option>
+          <option value="online">Online</option>
+          <option value="offline">Offline</option>
+          <option value="alert">Need attention</option>
+        </select>
+        <button class="btn" id="updateAll" title="Pull the latest version from GitHub and restart Server Monitor on every online server">Update all servers</button>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Server</th><th>Status</th><th>CPU</th><th>Memory</th><th>Disk</th><th class="num">Users</th>
+          <th>Alerts</th><th>Uptime</th><th>Version</th><th></th></tr></thead>
+        <tbody id="body"></tbody>
+      </table></div>
+    </div>
+  </main>
+</section>
+
+<dialog id="addDlg">
+  <h2>Add a server</h2>
+  <div class="sub">The server connects <b>out</b> to this hub over HTTPS – no port has to be opened on the server or its router.</div>
+  <ol>
+    <li>Install Server Monitor on the server (run <b>start.bat</b>).</li>
+    <li>Open its web page → <b>Update</b> tab → <b>Cloud monitoring</b>.</li>
+    <li>Paste the hub address and hub key below, click <b>Connect</b>. The server appears here within seconds.</li>
+  </ol>
+  <h3 class="sub" style="margin:14px 0 0">Hub address</h3>
+  <div class="copyrow"><input id="infoUrl" readonly><button class="btn" data-copy="infoUrl">Copy</button></div>
+  <h3 class="sub" style="margin:0">Hub key <span class="sub">(keep it secret – anyone with it can add a server)</span></h3>
+  <div class="copyrow"><input id="infoKey" readonly><button class="btn" data-copy="infoKey">Copy</button></div>
+  <div style="text-align:right"><button class="btn primary" id="addClose">Close</button></div>
+</dialog>
+
+<dialog id="auditDlg" style="max-width:980px">
+  <h2>Hub activity</h2>
+  <div class="tablewrap" style="max-height:65vh"><table>
+    <thead><tr><th>Time</th><th>User</th><th>From IP</th><th>Action</th><th>Target</th></tr></thead>
+    <tbody id="auditBody"></tbody>
+  </table></div>
+  <div style="text-align:right;margin-top:12px"><button class="btn primary" id="auditClose">Close</button></div>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const bytes = n => { const u=["B","KB","MB","GB","TB"]; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++} return n.toFixed(i?1:0)+" "+u[i]; };
+const dur = s => { const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m`; };
+const ago = s => s<60?"just now":s<3600?`${Math.floor(s/60)} min ago`:s<86400?`${Math.floor(s/3600)} h ago`:`${Math.floor(s/86400)} days ago`;
+const color = p => p>90?"var(--bad)":p>75?"var(--warn)":"var(--ok)";
+function toast(t, ms=3500){ const el=$("#toast"); el.textContent=t; el.classList.add("show"); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove("show"),ms); }
+
+async function api(path, opts={}){
+  const r=await fetch(path,{credentials:"same-origin",...opts,headers:{"Content-Type":"application/json","X-Requested-With":"fetch",...(opts.headers||{})}});
+  if(r.status===401 && path!=="/api/login"){ showLogin(); throw new Error("Signed out"); }
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw Object.assign(new Error(d.error||r.statusText),{data:d});
+  return d;
+}
+
+/* ---------- auth ---------- */
+let timer;
+function showLogin(){ clearInterval(timer); $("#app").classList.add("hidden"); $("#login").classList.remove("hidden"); $("#u").focus(); }
+function showApp(){ $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); load(); timer=setInterval(()=>{ if(!document.hidden) load(); },5000); }
+$("#loginForm").onsubmit=async e=>{
+  e.preventDefault(); $("#loginErr").textContent="";
+  try{ await api("/api/login",{method:"POST",body:JSON.stringify({username:$("#u").value,password:$("#p").value})}); $("#p").value=""; showApp(); }
+  catch(err){ $("#loginErr").textContent=err.message; }
+};
+$("#logout").onclick=async()=>{ await api("/api/logout",{method:"POST"}).catch(()=>{}); showLogin(); };
+
+/* ---------- servers ---------- */
+let servers=[], now=Date.now()/1000;
+function alertsOf(s){
+  const r=s.report||{}, a=[];
+  if(!s.online) return a;
+  if(r.cpu>90) a.push({bad:true,t:`CPU ${r.cpu.toFixed(0)}%`});
+  if(r.mem>90) a.push({bad:true,t:`Memory ${r.mem.toFixed(0)}%`});
+  (r.disks||[]).filter(d=>d.percent>90).forEach(d=>a.push({bad:true,t:`Disk ${d.mount} ${d.percent.toFixed(0)}% full`}));
+  if((r.stopped_services||[]).length) a.push({bad:false,t:`${r.stopped_services.length} automatic service${r.stopped_services.length>1?"s":""} stopped`,
+    title:r.stopped_services.join("\n")});
+  return a;
+}
+const needsAttention = s => !s.online || alertsOf(s).length>0;
+function meter(p, sub=""){
+  if(p==null) return "–";
+  return `<div class="meter"><b>${p.toFixed(0)}%</b> <span class="sub">${sub}</span><div class="bar"><i style="width:${Math.min(p,100)}%;background:${color(p)}"></i></div></div>`;
+}
+async function load(){
+  const r=await api("/api/servers").catch(()=>null); if(!r) return;
+  servers=r.servers; now=r.now;
+  $("#tTotal").textContent=servers.length;
+  $("#tOnline").textContent=servers.filter(s=>s.online).length;
+  const off=servers.filter(s=>!s.online).length; $("#tOffline").textContent=off; $("#tOffline").style.color=off?"var(--bad)":"";
+  const al=servers.filter(needsAttention).length; $("#tAlert").textContent=al; $("#tAlert").style.color=al?"var(--warn)":"";
+  $("#tUsers").textContent=servers.filter(s=>s.online).reduce((n,s)=>n+(s.report.users_active||0),0);
+  $("#lastUpdate").textContent="Updated "+new Date().toLocaleTimeString();
+  render();
+}
+function render(){
+  const q=$("#search").value.toLowerCase(), f=$("#filter").value;
+  const list=servers.filter(s=>{
+    const r=s.report||{};
+    if(q && !`${s.name} ${s.hostname} ${(r.ips||[]).join(" ")} ${s.public_ip} ${r.os||""}`.toLowerCase().includes(q)) return false;
+    if(f==="online") return s.online; if(f==="offline") return !s.online; if(f==="alert") return needsAttention(s);
+    return true;
+  });
+  $("#body").innerHTML=list.map(s=>{
+    const r=s.report||{}, disks=r.disks||[], worst=disks.reduce((a,d)=>!a||d.percent>a.percent?d:a,null);
+    const alerts=alertsOf(s);
+    const status=s.online?`<span class="pill on">● Online</span>`:`<span class="pill offl">Offline</span><div class="sub">${s.last_seen?ago(now-s.last_seen):"never connected"}</div>`;
+    return `<tr class="${s.online?"":"off"}">
+      <td><b>${esc(s.name)}</b><div class="sub">${esc(s.hostname&&s.hostname!==s.name?s.hostname+" · ":"")}${esc((r.ips||[]).join(", "))}</div>
+        <div class="sub">${esc(r.os||"")}</div></td>
+      <td>${status}</td>
+      <td>${s.online?meter(r.cpu):"–"}</td>
+      <td>${s.online?meter(r.mem, r.mem_total?"of "+bytes(r.mem_total):""):"–"}</td>
+      <td>${s.online&&worst?meter(worst.percent, esc(worst.mount)+" · "+bytes(worst.free)+" free"):"–"}</td>
+      <td class="num">${s.online?`${r.users_active||0}${r.users_disconnected?`<div class="sub">+${r.users_disconnected} disc.</div>`:""}`:"–"}</td>
+      <td>${alerts.map(a=>`<div class="alert ${a.bad?"bad":""}" title="${esc(a.title||"")}">⚠ ${esc(a.t)}</div>`).join("")||(s.online?`<span class="sub">OK</span>`:"")}</td>
+      <td>${s.online&&r.uptime?dur(r.uptime):"–"}</td>
+      <td class="sub">${esc(r.version||"–")}</td>
+      <td><div class="actions">
+        <a class="btn primary ${s.online?"":"disabled"}" href="/s/${esc(s.id)}/" target="_blank" rel="noopener">Open</a>
+        <button class="btn" data-a="rename" data-id="${esc(s.id)}">Rename</button>
+        ${s.online?`<button class="btn" data-a="update" data-id="${esc(s.id)}">Update</button>`
+                  :`<button class="btn" data-a="remove" data-id="${esc(s.id)}">Remove</button>`}
+      </div></td></tr>`;
+  }).join("") || `<tr><td colspan="10" class="sub" style="padding:24px">${servers.length?"No server matches":"No servers yet – click <b>Add server</b> to connect your first one."}</td></tr>`;
+}
+$("#search").oninput=render; $("#filter").onchange=render;
+
+async function updateServer(s){
+  const r=await fetch(`/s/${s.id}/api/update/pull`,{method:"POST",credentials:"same-origin",headers:{"X-Requested-With":"fetch","Content-Type":"application/json"}});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.error||r.statusText);
+  return d.changed ? "updated – restarting" : "already up to date";
+}
+$("#body").onclick=async e=>{
+  const b=e.target.closest("button[data-a]"); if(!b) return;
+  const s=servers.find(x=>x.id===b.dataset.id); if(!s) return;
+  if(b.dataset.a==="rename"){
+    const n=prompt("Name for this server (empty = use its host name):", s.name); if(n===null) return;
+    await api(`/api/servers/${s.id}`,{method:"POST",body:JSON.stringify({name:n})}).catch(err=>toast("✖ "+err.message)); load();
+  }
+  if(b.dataset.a==="remove"){
+    if(!confirm(`Remove ${s.name} from the list?\nIf it connects again it comes back.`)) return;
+    await api(`/api/servers/${s.id}`,{method:"DELETE"}).catch(err=>toast("✖ "+err.message)); load();
+  }
+  if(b.dataset.a==="update"){
+    if(!confirm(`Pull the latest version from GitHub on ${s.name} and restart Server Monitor there?`)) return;
+    b.disabled=true; b.textContent="Updating…";
+    try{ toast(`✔ ${s.name}: ${await updateServer(s)}`,6000); }catch(err){ toast(`✖ ${s.name}: ${err.message}`,8000); }
+    b.disabled=false; b.textContent="Update";
+  }
+};
+$("#updateAll").onclick=async()=>{
+  const online=servers.filter(s=>s.online);
+  if(!online.length) return toast("No server is online");
+  if(!confirm(`Pull the latest version from GitHub and restart Server Monitor on all ${online.length} online servers?`)) return;
+  $("#updateAll").disabled=true; $("#updateAll").textContent="Updating…";
+  const res=await Promise.all(online.map(s=>updateServer(s).then(m=>`✔ ${s.name}: ${m}`,err=>`✖ ${s.name}: ${err.message}`)));
+  toast(res.join("\n"),12000);
+  $("#updateAll").disabled=false; $("#updateAll").textContent="Update all servers";
+};
+
+/* ---------- dialogs ---------- */
+$("#addBtn").onclick=async()=>{
+  const i=await api("/api/info").catch(err=>{toast(err.message);return null;}); if(!i) return;
+  $("#infoUrl").value=i.hub_url; $("#infoKey").value=i.agent_key; $("#addDlg").showModal();
+};
+$("#addClose").onclick=()=>$("#addDlg").close();
+document.querySelectorAll("[data-copy]").forEach(b=>b.onclick=async()=>{
+  const el=$("#"+b.dataset.copy); el.select();
+  try{ await navigator.clipboard.writeText(el.value); }catch(e){ document.execCommand("copy"); }
+  b.textContent="Copied"; setTimeout(()=>b.textContent="Copy",1500);
+});
+$("#auditBtn").onclick=async()=>{
+  const a=await api("/api/audit").catch(()=>[]);
+  $("#auditBody").innerHTML=a.map(x=>`<tr><td style="white-space:nowrap">${esc(x.time.replace("T"," "))}</td><td>${esc(x.user)}</td><td>${esc(x.ip)}</td>
+    <td>${esc(x.action)}</td><td>${esc(x.target)}${x.detail?`<div class="sub">${esc(x.detail)}</div>`:""}</td></tr>`).join("")||`<tr><td colspan="5" class="sub">Nothing yet</td></tr>`;
+  $("#auditDlg").showModal();
+};
+$("#auditClose").onclick=()=>$("#auditDlg").close();
+
+api("/api/me").then(r=>r.user?showApp():showLogin()).catch(showLogin);
+</script>
+</body>
+</html>

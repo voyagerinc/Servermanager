@@ -10,3 +10,8 @@ __pycache__/
 # Archives / local copies
 *.rar
 *.zip
+
+# Hub machine files - never commit
+hub/hub_config.json
+hub/servers.json
+hub/hub_audit.log

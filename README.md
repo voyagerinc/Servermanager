@@ -51,6 +51,45 @@ The update replaces the program files with the GitHub version. Each server's own
 Server Monitor runs under a small watchdog (`app.py --supervise`) that restarts it after an
 update and if it ever crashes.
 
+## Monitor all servers from one page – without opening ports (Hub)
+
+The **Hub** (`hub/` folder) shows every server on one page: online/offline, CPU, memory,
+disk, signed-in users and stopped services, with **Open** (that server's full Server Monitor),
+**Update** and **Update all servers**.
+
+The servers connect **out** to the hub over HTTPS – like AnyDesk/UltraViewer – so **no port
+is opened on any server or customer router**. Only the hub needs one address the servers can reach.
+
+```
+ Server A ─┐   outgoing HTTPS only          ┌─ your laptop / phone
+ Server B ─┼──►  Server Monitor HUB   ◄─────┤  https://hub.yourcompany.com
+ Server C ─┘                                └─
+```
+
+**1. Start the hub** on one machine: double-click `hub\start-hub.bat` (or `python hub/hub.py`
+on Linux). It asks for the hub username/password and listens on port 30090.
+
+**2. Give the hub an address** the servers can reach – pick one:
+
+- **Office PC + Cloudflare Tunnel (free, no port opened anywhere):** in a free Cloudflare
+  account with your domain, go to *Zero Trust → Networks → Tunnels → Create tunnel*, install the
+  connector on the hub PC with the command Cloudflare shows, and add a public hostname, e.g.
+  `hub.voyager.co.in` → `http://localhost:30090`. Cloudflare provides the HTTPS certificate.
+  To just try it without a domain: `cloudflared tunnel --url http://localhost:30090` prints a
+  temporary `https://….trycloudflare.com` address (it changes on every restart).
+- **A small cloud server** (Azure, AWS Lightsail, DigitalOcean, Hetzner…): run the hub there and
+  put HTTPS in front of it, e.g. `caddy reverse-proxy --from hub.yourcompany.com --to localhost:30090`.
+
+Always use an **https://** address on the internet – the hub can run commands on every server.
+
+**3. Connect each server:** open the hub → **Add server** to see the hub address and hub key.
+On the server open Server Monitor → **Update** tab → **Cloud monitoring**, paste both, click
+**Connect**. The server appears in the hub within seconds and reconnects by itself after restarts.
+
+The hub key is in `hub/hub_config.json` (`agent_key`); change it there and restart the hub to
+lock out every server that used the old key. The hub's activity log records every action
+done through it, and each server's own Activity log shows them as `<hub user>@hub`.
+
 ## Install on Linux
 
 ```
@@ -68,6 +107,7 @@ sudo venv/bin/python app.py      # root is needed to restart services
 | `protected_services` | Never controllable from the web page (RPC, EventLog, RDP, WinRM… by default) |
 | `session_minutes` | Auto sign-out time |
 | `terminal_enabled` | `true` = Terminal tab can run commands on the server, `false` = turned off |
+| `hub_url`, `hub_key` | Cloud monitoring hub this server connects to (set from the Update tab); empty = off |
 | `ssl_cert`, `ssl_key` | Paths to a certificate to serve over HTTPS |
 
 Change the password any time: `venv\Scripts\python app.py --set-password`, then restart the
